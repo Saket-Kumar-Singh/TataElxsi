@@ -55,5 +55,7 @@ def read_dem(file):
       for j in range(len(dem[0])):
         dem[i][j] = float(dem[i][j])
 
+    return dem    
+
 
 

@@ -1,4 +1,4 @@
-from process_dem import  find_conv, st_dev, abs
+from process_dem import  find_conv, st_dev
 import pickle
 from queue import PriorityQueue as PQ
 from resources import np, noise, gaussian_filter, math, PQ

@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import noise
 from scipy.ndimage import gaussian_filter
 
+"""This is a file to generate DEM run this if dem is not already present..."""
+
 if os.path.exists('DEM.txt'):
     print('The file exists!')
 else:
@@ -60,7 +62,6 @@ if __name__ == "__main__":
     new_max = 4 # Adjust the new maximum height
 
     smooth_dem = generate_smooth_dem(rows, cols, scale, octaves, persistence, lacunarity, seed, smoothness, new_min, new_max)
-    print(smooth_dem)
     plot_dem(smooth_dem)
     file = open("DEM.txt", 'a')
     for i in range(len(smooth_dem)):

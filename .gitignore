@@ -3,6 +3,7 @@ myenv
 test.py
 copied_mpc.py
 simulation_code.py
-__pyache__
+__pycache__
 bfg-repo-cleaner
-vehicle/__pyache__
+vehicle/__pycache__
+server/__pycache__
