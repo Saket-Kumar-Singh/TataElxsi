@@ -24,10 +24,10 @@ class vehicle:
     pq = PQ()
     pq.put((0,0, x, y, x, y))
     while (not pq.empty()) and (x != x1 or y != y1):
-      print(x,y)
+      # print(x,y)
       tup = pq.get()
       hst, cst, x, y, x_o, y_o  = tup[0], tup[1], tup[2], tup[3], tup[4], tup[5]
-      print(x_o, y_o)
+      # print(x_o, y_o)
 
       self.vis[x][y] = (x_o, y_o)
       # self.path.append((x,y))
@@ -36,5 +36,19 @@ class vehicle:
           if(x + dir[i] < map.dim[0] and x + dir[i] >= 0) and (y+ dir[j] < map.dim[1] and y + dir[j] >= 0):
             if self.vis[x + dir[i]][y + dir[j]] == (-1, -1):
               val = cst + map.cost(x, y, x + dir[i], y + dir[j]) + math.sqrt((step_size*dir[i])**2 + (step_size*dir[j])**2)
-              val1 =  4*math.sqrt((x1 - x - dir[i])**2 + (y1 - y - dir[j])**2)
+              val1 =  2*math.sqrt((x1 - x - dir[i])**2 + (y1 - y - dir[j])**2)
               pq.put((val+val1,val, x + dir[i] , y + dir[j], x, y))
+
+    (x,y) = self.end_location
+    (x1,y1) = self.stating_location
+    lst = []
+    lst.append(self.end_location)
+    while(x != x1 or y != y1):
+      (p,q)= self.vis[x][y]
+      print(p, q)
+      x, y = p, q
+      lst.append((x,y))
+
+    return lst  
+        # v[x][y] = count
+        # count = count + 1       

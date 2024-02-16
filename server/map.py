@@ -19,7 +19,7 @@ class map:
   def add_obstacles(self):
     for i in range(len(self.dem)):
       for j in range(len(self.dem[0])):
-        if self.dem_st_dev[i][j] > 8 :
+        if self.dem_st_dev[i][j] > 4 :
           self.obstacle[i][j] = 1
 
   def bfs(self):

@@ -1,4 +1,4 @@
-from resources import np, deepcopy, copy
+from server.resources import np, deepcopy, copy
 import math
 
 def multi(a, b):
