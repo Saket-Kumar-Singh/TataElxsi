@@ -87,15 +87,7 @@ def kalman(x, x_las, P,  array1, array2):
     Q = np.eye(3) 
     H = np.eye(3)   
     R = np.eye(3)
-
-    # Q = 0.1*Q
-    # H = 
-    # array1 = get_velocity('D:\\TataElxsi\\combined_file_imu.csv')
-    # array2 = get_acc('D:\\TataElxsi\\combined_file_imu.csv')
-    # imu =  np.concatenate((array1, array2)) # Assuming you have a function to get IMU data
-    # yk = get_position('D:\\TataElxsi\\combined_csv_file_gps.csv')
     imu = np.concatenate((array1, array2))
-    # yk =   np.concatenate((np.array(x_las) , imu)) # Assuming IMU data is added to position
     yk = np.array(x_las)
 
     xk_ = F @ yk + G @ imu

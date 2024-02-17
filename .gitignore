@@ -7,3 +7,5 @@ __pycache__
 bfg-repo-cleaner
 vehicle/__pycache__
 server/__pycache__
+geekfile.npy
+__pycache__/.
