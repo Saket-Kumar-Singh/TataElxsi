@@ -1,0 +1,572 @@
+#python
+import socket
+from time import sleep 
+import json
+from math import cos, sinh, atan , sin , pi
+import casadi as ca
+import numpy as np
+from datetime import datetime
+
+class mpc_solve():
+    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, L = 1, dt = 0.1):
+        print(x_init, y_init, theta_init,  v_max, v_min, delta_max, delta_min, N, L, dt)
+        self.L = L # Length of the vehicle (distance between front and rear wheels)
+        v_max = v_max  # Maximum velocity
+        v_min = v_min  # Minimum velocity
+        delta_max = delta_max  # Maximum steering angle
+        delta_min = delta_min  # Minimum steering angle
+        self.N = N
+        self.dt = dt  # Time step duration    
+        # Define symbolic variables for the states and controls
+        x = ca.SX.sym('x')  # x-position
+        y = ca.SX.sym('y')  # y-position
+        theta = ca.SX.sym('theta')  # orientation
+        v = ca.SX.sym('v')  # velocity
+        delta = ca.SX.sym('delta')  # steering angle
+        Q_x = 10
+        Q_y = 10
+        Q_theta = 1
+        R1 = 0.3
+        R2 = 0.3
+        # Define the state vector
+        self.states = ca.vertcat(x, y, theta)
+
+        # Define the control vector
+        self.controls = ca.vertcat(v, delta)
+
+        self.n_states = self.states.numel()
+        self.n_controls = self.controls.numel()
+
+        X = ca.SX.sym('X', self.n_states, self.N+1)
+        U = ca.SX.sym('U', self.n_controls, self.N)
+
+        # P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + self.n_states)
+        P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + self.n_states)
+
+        Q = ca.diagcat(Q_x, Q_y, Q_theta)
+        R = ca.diagcat(R1, R2)
+        # D = ca.diagcat(dst1, dst2, dst3)
+
+        # Define the dynamics of the bicycle model
+        x_dot = ca.SX.sym('x_dot')
+        y_dot = ca.SX.sym('y_dot')
+        theta_dot = ca.SX.sym('theta_dot')
+
+
+        x_dot = v * cos(theta)
+        y_dot =  v * sin(theta)
+        theta_dot = v * sin(delta) / self.L
+
+        rhs = ca.vertcat(
+            x_dot, 
+            y_dot, 
+            theta_dot,
+        )
+
+        # Define the discrete-time dynamics using a forward Euler integration scheme
+        # rhs = states + change
+        self.f = ca.Function('f', [self.states, self.controls], [rhs])
+        cost_fn = 0
+        g = X[:,0] - P[:self.n_states]
+
+        # Define the lower and upper bounds for the states and controls
+        lbx = ca.DM.zeros((self.n_states*(self.N+1) + self.n_controls*self.N, 1))
+        ubx = ca.DM.zeros((self.n_states*(self.N+1) + self.n_controls*self.N, 1))
+
+        lbx[0:self.n_states*(self.N+1) : self.n_states] = -2000
+        lbx[1:self.n_states*(self.N+1) : self.n_states] = -2000
+        lbx[2:self.n_states*(self.N+1) : self.n_states] = -ca.inf
+
+        ubx[0:self.n_states*(self.N+1) : self.n_states] = 2000
+        ubx[1:self.n_states*(self.N+1) : self.n_states] = 2000
+        ubx[2:self.n_states*(self.N+1) : self.n_states] = ca.inf
+
+        lbx[self.n_states*(self.N+1) : :self.n_controls] = v_min
+        ubx[self.n_states*(self.N+1) : :self.n_controls] = v_max
+
+        lbx[self.n_states*(self.N+1) +1 : : self.n_controls] = delta_min
+        ubx[self.n_states*(self.N+1) + 1: : self.n_controls] = delta_max
+
+        d = P[(self.N+1)*self.n_states + self.n_controls:]
+        las_con = P[(self.N+1)*self.n_states:(self.N+1)*self.n_states + self.n_controls]
+        for k in range(self.N):
+            # print(las_con)
+            st = X[:, k]
+            con = U[:, k]
+            con_diff = con - las_con 
+            # con_diff = ca.fabs(con_diff)
+ 
+            cost_fn = cost_fn + (st - P[(k+1)*self.n_states:(k+2)*self.n_states]).T @ Q @ (st - P[(k+1)*self.n_states:(k+2)*self.n_states]) + con_diff.T @ R @ con_diff  
+            print("Here was the evaluation")
+            print(f"The cost now is {cost_fn}")
+            st_next = X[:, k+1]
+            k1 = self.f(st, con)
+            k2 = self.f(st+ (self.dt/2)*k1, con)
+            k3 = self.f(st+ (self.dt/2)*k2, con)
+            k4 = self.f(st + self.dt*k3, con)
+            # print(st, k1)
+            st_next_RK4 = st + ca.repmat(self.dt/6, self.n_states, 1)*(k1 + 2*k2 + 2*k3 +  k4)
+            g = ca.vertcat(g, st_next - st_next_RK4)
+            las_con = con
+
+        obsx = d[0]
+        obsy = d[1]
+        rad = d[2]
+        for k in range(self.N):
+            g = ca.vertcat(g, -((X[0, k] - obsx)**2 + (X[1, k] - obsy)**2) + (self.L + rad))
+
+        self.OPT_variable = ca.vertcat(
+            X.reshape((-1, 1)), 
+            U.reshape((-1, 1))
+        )
+
+        self.nlp_prob = {
+            'f' : cost_fn,
+            'x' : self.OPT_variable,
+            'g' : g,
+            'p' : P
+        }
+
+        lbg = ca.DM.zeros((self.n_states*(self.N+1) + self.N, 1)) 
+        lbg[self.n_states*(self.N + 1): , 0] = -1e9
+        self.args = {
+            'lbg' : lbg,
+            'ubg' : ca.DM.zeros((self.n_states*(self.N+1) + self.N, 1)),
+            'lbx' : lbx,
+            'ubx' : ubx
+        }
+
+        t0 = 0
+        state_init = ca.DM([x_init, y_init, theta_init])
+        t = ca.DM(t0)
+        u0 = ca.DM.zeros((self.n_controls, self.N))
+        x0 = ca.repmat(state_init, 1, self.N+1)        
+        mpc_iter = 0
+        cat_states = self.DM2Arr(x0)
+        cat_controls = self.DM2Arr(u0[:, 0])
+        times = np.array([0])
+        # Set up the solver options
+        self.opts = {
+            'ipopt': {
+                'max_iter': 4000,
+                'print_level': 0,
+                'acceptable_tol': 1e-10,
+                'acceptable_obj_change_tol': 1e-7
+            },
+            'print_time': 0
+        }
+
+        self.solver = ca.nlpsol('solver', 'ipopt', self.nlp_prob, self.opts)
+
+    def shift_timestep(self, dt, t0, state_init, u, f):
+        f = self.f
+        f_value= state_init + ca.repmat(self.dt, self.n_states, 1)*f(state_init, u[:, 0]) + ca.DM(0.01*np.random.randn(3, 1))
+        next_state= ca.DM.full((f_value))
+
+        t0 = t0 + self.dt
+        u0 = ca.horzcat(
+            u[:, 1:],
+            ca.reshape(u[:, -1], -1, 1)
+        )
+           # return
+        return t0, next_state, u0
+
+    def DM2Arr(self, dm):
+        return np.array(dm.full())
+
+    def mpc_control(self,state_init,u,t_now, func, las_con):  
+        print(self.N)     
+        self.args['p'] = ca.vertcat(
+            state_init[:, 0],     # current state
+        )
+        for i in range(self.N):
+            self.args['p'] = ca.vertcat(
+            self.args['p'],
+            ca.DM(func(t_now + (i+1)*0.1))
+        )
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            las_con,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            ca.DM([100,100,1000]),     # current state
+        )   
+        print(self.args['p'])
+        self.args['x0'] = ca.vertcat(
+            ca.reshape(state_init, self.n_states*(self.N+1), 1),
+            ca.reshape(u, self.n_controls*self.N, 1)
+        )
+        print("Solving")
+        sol = self.solver(
+            x0 = self.args['x0'],
+            lbx=self.args['lbx'],
+            ubx=self.args['ubx'],
+            lbg=self.args['lbg'],
+            ubg=self.args['ubg'],
+            p=self.args['p']
+        )
+        print("solved")
+        print(sol)
+        u = ca.reshape(sol['x'][self.n_states * (self.N + 1):],   self.n_controls, self.N)
+        x0 = ca.reshape(sol['x'][: self.n_states * (self.N + 1)], self.n_states,   self.N+1)
+        print(u)
+        # new_con= u0[:, 0]
+        return x0,u
+
+def tan_inv(st1, st2):
+    if(st1[0] == st2[0]):
+        if(st1[1] > st2[1]):
+            return pi/2
+        else:
+            return pi/2
+    else:
+        return atan((st1[1] - st2[1])/(st1[0] - st2[0]))      
+
+
+def func(t, step_size = 5):
+    arr = self.arr
+    v_max = self.v_max/2
+    print(v_max)
+    __time = step_size*1.414/v_max
+    if(t/__time >= len(arr) - 1):
+        return [*arr[-1], tan_inv(arr[-1], arr[-2])]
+    
+    (x, y) = arr[int(t/__time)]
+    (x1, y1) = arr[int(t/__time) + 1]
+    p = int(t/__time)
+    theta = 0
+    theta = tan_inv((x, y), (x1, y1))
+    vx = v_max*cos(theta)
+    vy = v_max*sin(theta)
+    px = x + vx*(t - __time*p)
+    py = y + vy* (t - __time*p)
+    # To keep the value of p in bound
+    px = min(px, max(x,x1))
+    px = max(px, min(x, x1))
+    py = min(py, max(y,y1))
+    py = max(py, min(y,y1))
+    return [px, py, theta]
+
+def receiveMessage():
+    try: 
+        origin = sim.getIntegerSignal('messageReceiver')
+        message = sim.getStringSignal('messageData')
+        message = json.loads(message)
+        if  message['id'] == 'createdPath' and message['reciever'] == self.scriptHandle:
+            dta = message["data"]
+            dta = dta["reply"]
+            dta = dta[::-1]
+            msg = {
+                "reply" : dta
+            }
+            return msg
+        return False
+    except:
+        return False
+
+def get_path():
+    self.scriptHandle = sim.getScriptInt32Param(sim.handle_self, sim.scriptintparam_handle)
+    obj = sim.getObject("/Manta")
+    curr_pos = sim.getObjectPosition(obj)
+    message = {
+        'id' : 'pathPlanning',
+        'data' : {
+            'start_position' : curr_pos[:2],
+            'end_position' : self.end_position
+        }
+    }
+    sim.broadcastMsg(message)
+    
+    msg = False
+
+    while not msg:
+        msg = receiveMessage()
+    return msg    
+
+def dest_reached(state_init):
+    return ca.norm_2(((state_init) - ca.DM([*self.end_position, tan_inv(self.arr[-1], self.arr[-2])]))) < 1
+
+def make_slver(N,n_states, n_controls, v_max, v_min, delta_max, delta_min, x_init, y_init, theta_init):
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_address = ('127.0.0.1', 8800)  # Change IP address and port as needed
+    client_socket.connect(server_address)
+    data = {
+        "id" : "makeSolver",
+        "data" : {
+            "N" : N,
+            "n_controls" : n_controls,
+            "n_states" : n_states,
+            "x_init" : x_init,
+            "y_init" : y_init, 
+            "theta_init" : theta_init,
+            "v_max" : v_max,
+            "v_min" : v_min,
+            "delta_max" : delta_max,
+            "delta_min" : delta_min,
+            "arr" : self.arr
+        }
+    }
+    self.client_socket = client_socket
+    json_data = json.dumps(data)
+    try:
+        # Send the JSON data over the socket
+        json_data = json_data.encode("utf-8")
+        print(json_data)
+        client_socket.sendall(json_data)
+        ack = client_socket.recv(4096)
+        data = client_socket.recv(4096)
+        data = data.decode("utf-8")
+        data = json.loads(data)
+        try:
+            data = data["data"]
+            if data:
+                print("Solver Made Successfully...")
+            else:
+                print("Error Making Connection... Please Restart")
+        except:
+            print("Error Making Connection... Please Restart")   
+    finally:
+        # Close the socket connection
+        print("Now Generating Controls")
+
+def slv(x0, u, t, las_con):
+    client_socket = self.client_socket
+    x0 = x0.full()
+    x0 = x0.tolist()
+    u = u.tolist()
+    las_con = las_con.tolist()
+    data = {
+        "id" : "getControls",
+        "data" : {
+            "x0" : x0,
+            "t" : t,
+            "u" : u,
+            "las_con" : las_con,
+            "x1" : self.x1.tolist(),
+            "x2" : self.x2.tolist(),
+            "x3" : self.x3.tolist(),
+            "x4" : self.x4.tolist(),
+            "x5" : self.x5.tolist(),
+            "x6" : self.x6.tolist(),
+            "x7" : self.x7.tolist(),
+            "x8" : self.x8.tolist()
+
+        }
+    }
+    json_data = json.dumps(data)
+    try:
+        # Send the JSON data over the socket
+        lp = True
+        json_data = json_data.encode("utf-8")
+        while lp: 
+            client_socket.sendall(json_data)
+            data = client_socket.recv(4096)
+            if data:
+                lp = False
+            sleep(0.1)
+        print("[ACK] Data Send Properly...")        
+        data = client_socket.recv(4096)        
+        data = data.decode("utf-8")
+        data = json.loads(data)   
+        return data["data"]["x0"], data["data"]["u"], 
+    
+    finally:
+        # client_socket.close()
+        print(
+            "done"
+        )
+
+def sysCall_init():
+    sim = require('sim')
+    self.car_handle = sim.getObject("/Manta")
+    self.end_position = [10, 10]
+    self.step_size = 5
+    path = get_path()
+    self.arr = path["reply"]
+    print("Recieved Path", self.arr)
+    self.n_controls = 2
+    self.n_states = 3
+    self.N = 10
+    self.u = np.zeros((self.n_controls, self.N))
+    self.pos = sim.getObjectPosition(self.car_handle)
+    self.ang = sim.getObjectOrientation(self.car_handle)
+    print("self.pos" , self.pos)
+    print("self.orientation", self.ang)
+    self.x1 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x2 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x3 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x4 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x5 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x6 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x7 = np.array([-200, -200, -200]).reshape(3, 1)
+    self.x8 = np.array([-200, -200, -200]).reshape(3, 1)
+    # self.ang
+    self.pos = [self.pos[0], self.pos[1], self.ang[0]]
+    self.theta = self.ang[0]
+    print("self.init", self.pos)
+    self.pos = np.array(self.pos).reshape(3, 1)
+    self.state_init = self.pos
+
+    msg = {
+        "id" : "stateInit",
+        "data" : self.pos.tolist()
+    }
+    msg = json.dumps(msg)
+    msg = msg.encode("utf-8")
+    sim.setStringSignal("stateInit", msg)
+    # print(self.state_init)
+    self.x0 = ca.repmat(self.state_init, 1, self.N+1)
+    self.state_final =  [*self.arr[-1], tan_inv(self.arr[-2], self.arr[-1])]
+    self.state_final = np.array(self.state_final).reshape(3, 1)
+    self.v_max = 5
+    self.v_min = -5
+    self.delta_max = pi/3
+    self.delta_min = -pi/3
+    print("Making Solver")
+    self.slver = make_slver(self.N, self.n_states, self.n_controls, self.v_max, self.v_min, self.delta_max, self.delta_min, *self.state_init.tolist())
+    self.start_time = datetime.now()
+    self.t = 0
+    self.pos = self.state_init
+    self.x0 = ca.repmat(self.state_init, 1, self.N + 1)
+    self.ref = sim.getObjectHandle("/Dummy[1]")
+    self.B = sim.getObject("/Manta/Proximity_sensor[1]")
+    self.F = sim.getObject("/Manta/Proximity_sensor[3]")
+    self.L = sim.getObject("/Manta/Proximity_sensor[2]")
+    self.R = sim.getObject("/Manta/Proximity_sensor[0]")
+    self.FL = sim.getObject("/Manta/Proximity_sensor[6]")
+    self.BR= sim.getObject("/Manta/Proximity_sensor[7]")
+    self.FR= sim.getObject("/Manta/Proximity_sensor[4]")
+    self.BL = sim.getObject("/Manta/Proximity_sensor[5]")
+    # self.R = sim.getObject("/Manta/Proximity_sensor[0]")
+    # do some initialization here
+
+def sysCall_actuation():
+    if dest_reached(self.x0[:, 0]):
+        print("Destination reached")
+    else:
+        t = self.t
+        las_con = self.u[:, 0]
+        state_init = self.pos
+        # print("self.pos" , self.pos)
+        # print(ca.DM(self.pos.tolist()).shape, ca.DM(self.x0[:, 2:].full().tolist()).shape, ca.DM(ca.reshape(self.x0[:, -1], -1, 1).full().tolist()).shape)
+        state_init = ca.horzcat(
+            ca.DM(self.pos.tolist()),
+            ca.DM(self.x0[:, 2:].full().tolist()),
+            ca.DM(ca.reshape(self.x0[:, -1], -1, 1).full().tolist())
+        )
+        # state_init = ca.repmat([*self.arr[0], tan_inv(self.arr[0], self.arr[1])], 1, self.N+1)
+        self.x0, self.u = slv(state_init, self.u, t,  las_con)  
+        self.u = np.array(self.u)
+        self.x0 = ca.DM(self.x0)
+        print(self.u[:, 0])
+        u = self.u[:, 0].tolist()
+        print(u)
+        v = u[0]
+        delta = u[1]
+        self.theta = self.theta + 0.1*v*sin(delta)/1
+        json_data = {
+            "id": "controls",
+            "data" : u
+        }
+        json_data = json.dumps(json_data)
+        sim.setStringSignal(f"controls{self.t}", json_data.encode("utf-8"))
+        self.t = self.t + 0.1
+          
+    # put your actuation code here
+
+def sysCall_sensing():
+    self.pos = sim.getObjectPosition(self.car_handle)
+    self.ang = sim.getObjectOrientation(self.car_handle)
+    print("self.pos" , self.pos)
+    print("self.orientation", self.ang)
+    # self.ang
+    self.pos = [self.pos[0], self.pos[1], self.theta]
+    print("self.init", self.pos)
+    self.pos = np.array(self.pos).reshape(3, 1)
+    mat = sim.getObjectMatrix(self.car_handle, self.ref)
+    mat = np.array(mat)
+    print(type(mat))
+    mat = mat.reshape(3, 4)
+    print(mat)
+    print(mat.shape)
+    mat = np.vstack((mat, np.array([0, 0, 0, 1])))
+    print(mat)
+
+    lst= sim.readProximitySensor(self.B)
+    flagB, disB = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.F)
+    flagF, disF = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.R)
+    flagR, disR = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.L)
+    flagL, disL = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.FL)
+    flagFL, disFL = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.BL)
+    flagBL, disBL = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.BR)
+    flagBR, disBR = lst[0], lst[1]
+    lst= sim.readProximitySensor(self.FR)
+    flagFR, disFR = lst[0], lst[1]
+    print("B", flagB, disB)
+    print("F", flagF, disF)
+    print("R", flagR, disR)
+    print("FL", flagFL, disFL)
+    print("BL", flagBL, disBL)
+    print("BR", flagBR, disBR)
+    print("FR", flagFR, disFR)
+    inf = 1000
+
+    self.x1 = [0, flagF*disF, 0]
+    if(self.x1 == [0,0,0]):
+        self.x1 = [-inf, -inf, -inf]
+    self.x2 = [flagR*disR, 0, 0]
+    if(self.x2 == [0,0,0]):
+        self.x2 = [-inf, -inf, -inf]
+    self.x3 = [-1*flagL*disL, 0, 0]
+    if(self.x3 == [0,0,0]):
+        self.x3 = [-inf, -inf, -inf]
+    self.x4 = [0, -1*flagB, 0]
+    if(self.x4 == [0,0,0]):
+        self.x4 = [-inf, -inf, -inf]
+    self.x5 = [flagFR*disFR*0.7071067811865476, flagFR*disFR*0.7071067811865476, 0]
+    if(self.x5 == [0,0,0]):
+        self.x5 = [-inf, -inf, -inf]
+    self.x6 = [-1*flagFL*disFL*0.7071067811865476, flagFL*disFL*0.7071067811865476, 0]
+    if(self.x6 == [0,0,0]):
+        self.x6 = [-inf, -inf, -inf]
+    self.x7 = [flagBR*disBR*0.7071067811865476, -1*flagBR*disBR*0.7071067811865476, 0]
+    if(self.x7 == [0,0,0]):
+        self.x7 = [-inf, -inf, -inf]
+    self.x8 = [-1*flagBL*disBL*0.7071067811865476, -1*flagBL*disBL*0.7071067811865476, 0]
+    if(self.x8 == [0,0,0]):
+        self.x8 = [-inf, -inf, -inf]
+
+    self.x1 = (mat @ np.vstack((np.array(self.x1).reshape(3,1), [[1]])))[:3, 0]
+    self.x2 = (mat @ np.vstack((np.array(self.x2).reshape(3,1), [[1]])))[:3, 0]
+    self.x3 = (mat @ np.vstack((np.array(self.x3).reshape(3,1), [[1]])))[:3, 0]
+    self.x4 = (mat @ np.vstack((np.array(self.x4).reshape(3,1), [[1]])))[:3, 0]
+    self.x5 = (mat @ np.vstack((np.array(self.x5).reshape(3,1), [[1]])))[:3, 0]
+    self.x6 = (mat @ np.vstack((np.array(self.x6).reshape(3,1), [[1]])))[:3, 0]
+    self.x7 = (mat @ np.vstack((np.array(self.x7).reshape(3,1), [[1]])))[:3, 0]
+    self.x8 = (mat @ np.vstack((np.array(self.x8).reshape(3,1), [[1]])))[:3, 0]
+
+
+    print("self.x1", self.x1)
+    print("self.x2", self.x2)
+    print("self.x3", self.x3)
+    print("self.x4", self.x4)
+    print("self.x5", self.x5)
+    print("self.x6", self.x6)
+    print("self.x7", self.x7)
+    print("self.x8", self.x8)
+    # print("L", flagL, disL)
+    # put your sensing code here
+    pass
+
+def sysCall_cleanup():
+    # do some clean-up here
+    pass
+
+# See the user manual or the available code snippets for additional callback functions and details

@@ -6,7 +6,7 @@ from math import cos, sin, atan, pi
 import casadi as ca
 from time import sleep
 
-def return_message(data):
+def return_message(client_socket, data):
     data = data.encode("utf-8")
     client_socket.sendall(data)
 
@@ -16,7 +16,8 @@ global arr
 
 def func(t,  step_size = 5):
     global v_max
-    __time = step_size/v_max
+    v_m = v_max/2
+    __time = 1*step_size/v_m
     if(t/__time >= len(arr) - 1):
         return [*arr[-1], tan_inv(arr[-1], arr[-2])]
     
@@ -26,13 +27,13 @@ def func(t,  step_size = 5):
     theta = 0
     if(x1 == x):
         if(y1 > y):
-            theta = pi/2
-        else:    
             theta = -pi/2
+        else:    
+            theta = pi/2
     else:
         theta = atan((y1 - y)/(x1 - x))
-    vx = 3*cos(theta)
-    vy = 3*sin(theta)
+    vx = v_m*cos(theta)
+    vy = v_m*sin(theta)
     px = x + vx*(t - __time*p)
     py = y + vy* (t - __time*p)
     # To keep the value of p in bound
@@ -54,41 +55,43 @@ if __name__ == "__main__":
     # Receive commands from CoppeliaSim and send predictions
     client_socket, addr = server_socket.accept()
     print(f"Connected to {addr}")
-
+    slver = ""
     while True:
         data = client_socket.recv(4096)
         ack = "ACK"
         client_socket.sendall(ack.encode("utf-8"))
         # print("recievedSomething")
         data = data.decode('utf-8')
+        
         # print(data)
         if data:
             data = json.loads(data)
-            print("[RECIEVED]", data)
+            # print("[RECIEVED]", data)
             if(data["id"] == "makeSolver"):
-                try:
-                    global vmax
-                    v_max = data["data"]["v_max"]
-                    slver = mpc_solve(
-                        data["data"]["x_init"],data["data"]["y_init"],\
-                                       data["data"]["theta_init"], data["data"]["v_max"],\
-                                          data["data"]["v_min"], data["data"]["delta_max"], \
-                                            data["data"]["delta_min"], data["data"]["N"]\
-                                                )
-                    arr = data["data"]["arr"]
-                    data = {
-                        "id" : "mpcMakingResult",
-                        "data" : True
-                    }
-                    data = json.dumps(data)
-                    return_message(data)
-                except:
-                    data = {
-                        "id" : "mpcMakingResult",
-                        "data" : False
-                    }     
-                    data = json.dumps(data)           
-                    return_message(data)
+                print("Making Solver")
+                # try:
+                global vmax
+                v_max = data["data"]["v_max"]
+                slver = mpc_solve(
+                    data["data"]["x_init"],data["data"]["y_init"],\
+                                   data["data"]["theta_init"], data["data"]["v_max"],\
+                                      data["data"]["v_min"], data["data"]["delta_max"], \
+                                        data["data"]["delta_min"], data["data"]["N"]\
+                                            , 0.005, data["data"]["L"])
+                arr = data["data"]["arr"]
+                data = {
+                    "id" : "mpcMakingResult",
+                    "data" : True
+                }
+                data = json.dumps(data)
+                return_message(client_socket, data)
+                # except:
+                #     data = {
+                #         "id" : "mpcMakingResult",
+                #         "data" : False
+                #     }     
+                #     data = json.dumps(data)           
+                #     return_message(client_socket, data)
 
             else:
                 # print("No Shit")
@@ -96,11 +99,19 @@ if __name__ == "__main__":
                 u = np.array(data["data"]["u"])
                 t_now = data["data"]["t"]
                 las_con = np.array(data["data"]["las_con"])
-                print(np.array(x0).shape)
+                x1 = np.array(data["data"]["x1"])
+                x2 = np.array(data["data"]["x2"])
+                x3 = np.array(data["data"]["x3"])
+                x4 = np.array(data["data"]["x4"])
+                x5 = np.array(data["data"]["x5"])
+                x6 = np.array(data["data"]["x6"])
+                x7 = np.array(data["data"]["x7"])
+                x8 = np.array(data["data"]["x8"])
+                # print(np.array(x0).shape)
                 x0 = ca.DM(x0)
                 u = np.array(u)
-                x0, u = slver.mpc_control(x0, u, t_now, func, las_con)
-                print(u[:, 0])
+                x0, u = slver.mpc_control(x0, u, t_now, func, las_con,x0, x1, x2, x3, x4, x5, x6, x7, x8)
+                # print(u[:, 0])
                 x0 = x0.full()
                 x0 = x0.tolist()
                 u = u.full()
@@ -113,7 +124,7 @@ if __name__ == "__main__":
                     } 
                 }
                 message = json.dumps(message)
-                return_message(message)
+                return_message(client_socket, message)
         sleep(0.1)
         # client_socket.close()
     # Close sockets

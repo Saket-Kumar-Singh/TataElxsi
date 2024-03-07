@@ -7,10 +7,17 @@ import matplotlib.pyplot as plt
 from simulation_code import simulate
 
 
+def sign(n):
+    if n > 0:
+        return 1
+    elif n < 0:
+        return -1
+    return 0
+
 # Defi
 class mpc_solve():
-    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, dt = 0.1):
-        self.L = 1 # Length of the vehicle (distance between front and rear wheels)
+    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, dt = 0.1, L = 1):
+        self.L = L # Length of the vehicle (distance between front and rear wheels)
         v_max = v_max  # Maximum velocity
         v_min = v_min  # Minimum velocity
         delta_max = delta_max  # Maximum steering angle
@@ -33,9 +40,9 @@ class mpc_solve():
         # y_target = 14
         # theta_target = -pi/4
 
-        Q_x = 1
-        Q_y = 1
-        Q_theta = 1
+        Q_x = 10
+        Q_y = 10
+        Q_theta = 10
         R1 = 0.3
         R2 = 0.3
         # Define the state vector
@@ -51,7 +58,7 @@ class mpc_solve():
         U = ca.SX.sym('U', self.n_controls, self.N)
 
         # P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + self.n_states)
-        P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + self.n_states)
+        P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + 8*3)
 
         Q = ca.diagcat(Q_x, Q_y, Q_theta)
         R = ca.diagcat(R1, R2)
@@ -97,7 +104,15 @@ class mpc_solve():
         lbx[self.n_states*(self.N+1) +1 : : self.n_controls] = delta_min
         ubx[self.n_states*(self.N+1) + 1: : self.n_controls] = delta_max
 
-        d = P[(self.N+1)*self.n_states + self.n_controls:]
+        d1 = P[(self.N+1)*self.n_states + self.n_controls:(self.N+1)*self.n_states + self.n_controls + 3]
+        d2 = P[(self.N+1)*self.n_states + self.n_controls + 3:(self.N+1)*self.n_states + self.n_controls + 6]
+        d3 = P[(self.N+1)*self.n_states + self.n_controls + 6:(self.N+1)*self.n_states + self.n_controls + 9]
+        d4 = P[(self.N+1)*self.n_states + self.n_controls + 9:(self.N+1)*self.n_states + self.n_controls + 12]
+        d5 = P[(self.N+1)*self.n_states + self.n_controls + 12:(self.N+1)*self.n_states + self.n_controls + 15]
+        d6 = P[(self.N+1)*self.n_states + self.n_controls + 15:(self.N+1)*self.n_states + self.n_controls + 18]
+        d7 = P[(self.N+1)*self.n_states + self.n_controls + 18:(self.N+1)*self.n_states + self.n_controls + 21]
+        d8 = P[(self.N+1)*self.n_states + self.n_controls + 21:(self.N+1)*self.n_states + self.n_controls + 24]
+        # d1 = P[(self.N+1)*self.n_states + self.n_controls:(self.N+1)*self.n_states + self.n_controls]
         las_con = P[(self.N+1)*self.n_states:(self.N+1)*self.n_states + self.n_controls]
         for k in range(self.N):
             # print(las_con)
@@ -120,11 +135,41 @@ class mpc_solve():
             g = ca.vertcat(g, st_next - st_next_RK4)
             las_con = con
 
-        obsx = d[0]
-        obsy = d[1]
-        rad = d[2]
+        obsx1 = d1[0] # 
+        obsy1 = d1[1]
+
+        obsx2 = d2[0] 
+        obsy2 = d2[1]        
+        
+        obsx3 = d3[0] 
+        obsy3 = d3[1]        
+        
+        obsx4 = d4[0] 
+        obsy4 = d4[1]        
+        
+        obsx5 = d5[0] 
+        obsy5 = d5[1]        
+        
+        obsx6 = d6[0] 
+        obsy6 = d6[1]        
+        
+        obsx7 = d7[0] 
+        obsy7 = d7[1]        
+        
+        obsx8 = d8[0] 
+        obsy8 = d8[1]
+        # obsx9 = d9[0] 
+        # obsy9 = d9[1]
+        rad = 1
         for k in range(self.N):
-            g = ca.vertcat(g, -((X[0, k] - obsx)**2 + (X[1, k] - obsy)**2) + (self.L + rad))
+            g = ca.vertcat(g, -((X[0, k] - obsx1)**2 + (X[1, k] - obsy1)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx2)**2 + (X[1, k] - obsy2)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx3)**2 + (X[1, k] - obsy3)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx4)**2 + (X[1, k] - obsy4)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx5)**2 + (X[1, k] - obsy5)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx6)**2 + (X[1, k] - obsy6)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx7)**2 + (X[1, k] - obsy7)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx8)**2 + (X[1, k] - obsy8)**2) + (1.5*self.L + 1))
 
         self.OPT_variable = ca.vertcat(
             X.reshape((-1, 1)), 
@@ -138,11 +183,11 @@ class mpc_solve():
             'p' : P
         }
 
-        lbg = ca.DM.zeros((self.n_states*(self.N+1) + self.N, 1)) 
+        lbg = ca.DM.zeros((self.n_states*(self.N+1) + 8*self.N, 1)) 
         lbg[self.n_states*(self.N + 1): , 0] = -1e9
         self.args = {
             'lbg' : lbg,
-            'ubg' : ca.DM.zeros((self.n_states*(self.N+1) + self.N, 1)),
+            'ubg' : ca.DM.zeros((self.n_states*(self.N+1) + 8*self.N, 1)),
             'lbx' : lbx,
             'ubx' : ubx
         }
@@ -171,7 +216,7 @@ class mpc_solve():
 
     def shift_timestep(self, dt, t0, state_init, u, f):
         f = self.f
-        f_value= state_init + ca.repmat(self.dt, self.n_states, 1)*f(state_init, u[:, 0]) + ca.DM(0.01*np.random.randn(3, 1))
+        f_value = state_init + ca.repmat(self.dt, self.n_states, 1)*f(state_init, u[:, 0]) + ca.DM(0.01*np.random.randn(3, 1))
         next_state= ca.DM.full((f_value))
 
         t0 = t0 + self.dt
@@ -185,23 +230,54 @@ class mpc_solve():
     def DM2Arr(self, dm):
         return np.array(dm.full())
 
-    def mpc_control(self,state_init,u,t_now, func, las_con):  
-        print(self.N)     
+    def mpc_control(self,state_init,u,t_now, func, las_con, x0, x1, x2, x3, x4, x5, x6, x7, x8):  
+        # print(self.N)     
         self.args['p'] = ca.vertcat(
             state_init[:, 0],     # current state
         )
+        print("time ", t_now)
         for i in range(self.N):
+            print(func(t_now + (i+1)*0.1))
             self.args['p'] = ca.vertcat(
             self.args['p'],
             ca.DM(func(t_now + (i+1)*0.1))
         )
+        print("----------------------------------------")
         self.args['p'] = ca.vertcat(
             self.args['p'],
             las_con,     # current state
+        )    
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x1,     # current state
         )   
         self.args['p'] = ca.vertcat(
             self.args['p'],
-            ca.DM([10,10,1]),     # current state
+            x2,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x3,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x4,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x5,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x6,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x7,     # current state
+        )   
+        self.args['p'] = ca.vertcat(
+            self.args['p'],
+            x8,     # current state
         )   
 
         self.args['x0'] = ca.vertcat(
@@ -267,7 +343,7 @@ if __name__ == '__main__':
         
         (x, y) = arr[int(t/2.35)]
         (x1, y1) = arr[int(t/2.35) + 1]
-        p = int(t/3.503)
+        p = int(t/2.35)
         theta = 0
         if(x1 == x):
             if(y1 > y):
@@ -277,10 +353,10 @@ if __name__ == '__main__':
         else:
             theta = atan((y1 - y)/(x1 - x))
 
-        vx = 2*cos(theta)
-        vy = 2*sin(theta)
-        px = x + vx*(t - 3.05*p)
-        py = y + vy* (t - 3.05*p)
+        vx = 3*cos(theta)
+        vy = 3*sin(theta)
+        px = x + vx*(t - 2.35*p)
+        py = y + vy* (t - 2.35*p)
 
         # To keep the value of p in bound
         px = min(px, max(x,x1))
@@ -288,7 +364,7 @@ if __name__ == '__main__':
         py = min(py, max(y,y1))
         py = max(py, min(y,y1))
         return [px, py, theta]
-    
+
     t0 = 0
     slver1 = mpc_solve()    
     main_loop = time()  # return time in sec
@@ -335,10 +411,11 @@ if __name__ == '__main__':
             slver1.args['p'],
             ca.DM([0,0]),     # current state
         )
-        slver1.args['p'] = ca.vertcat(
-            slver1.args['p'],
-            ca.DM([10, 10, 0])
-        )
+        for i in range(8):
+            slver1.args['p'] = ca.vertcat(
+                slver1.args['p'],
+                ca.DM([10, 10, 0])
+            )
         # print(args['p'])
         # sleep(5)   
         # optimization variable current state
@@ -435,4 +512,4 @@ if __name__ == '__main__':
     plt.show()
     # simulate
     simulate(cat_states, cat_controls, times, slver1.dt, slver1.N,
-             np.array([x_init, y_init, theta_init, x_target, y_target, theta_target] ), ax, fig, save=False,)
+             np.array([x_init, y_init, theta_init, x_target, y_target, theta_target] ), ax, fig, save=True,)

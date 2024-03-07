@@ -45,6 +45,7 @@ class vehicle:
     (x1,y1) = self.stating_location
     lst = []
     lst.append(self.end_location)
+    lst.append((x, y))
     # for i in range(10):
     #   for j in range(10):
     #     print(self.vis[i][j], end = " ")

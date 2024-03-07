@@ -193,5 +193,6 @@ if __name__ == "__main__":
             ca.reshape(x0[:, -1], -1, 1)
         )
 
+    plt.scatter(10,10,s = (1**2) * 100, color = 'red', marker = 'o')   
     plt.plot(x_mpc, y_mpc)     
     plt.show()   
