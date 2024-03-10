@@ -17,7 +17,7 @@ def sign(n):
 
 # Defi
 class mpc_solve():
-    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, dt = 0.1, L = 1, a_min = -1, a_max = 1):
+    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, dt = 0.1, L = 1, a_max = 1, a_min = -1):
         self.L = L # Length of the vehicle (distance between front and rear wheels)
         v_max = v_max  # Maximum velocity
         v_min = v_min  # Minimum velocity

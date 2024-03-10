@@ -1,0 +1,157 @@
+--lua
+sim=require'sim'
+local utf8 = require("utf8")
+
+local function decode(message)
+    res = ""
+    for _, char in utf8.codes(str) do
+        res = res .. utf8.char(char)
+    end    
+end
+
+local function round(number)
+    return tonumber(string.format("%.1f", number))
+end 
+
+function split(str, delimiter)
+    local result = {}
+    local pattern = string.format("([^%s]+)", delimiter)
+    for substr in string.gmatch(str, pattern) do
+        -- print(tonumber(substr))
+        table.insert(result, tonumber(substr))
+    end
+    return result
+end
+
+
+function sysCall_init() 
+    obj = sim.getObject("/Manta")
+    steer_handle= sim.getObject('./steer_joint')
+    motor_handle= sim.getObject('./motor_joint')
+    fl_brake_handle= sim.getObject('./fl_brake_joint')
+    fr_brake_handle= sim.getObject('./fr_brake_joint')
+    bl_brake_handle= sim.getObject('./bl_brake_joint')
+    br_brake_handle= sim.getObject('./br_brake_joint')
+    
+    --wheel radius:         0.09
+    --wheel base:             0.6
+    --wheel track:             0.35
+    --maximum steering rate:     70 deg/sec
+    
+    --the maximum steer angle 30 degree
+    max_steer_angle=0.5235987
+        --the maximum torque of the motor
+    motor_torque=60
+        
+    dVel=1
+    dSteer=0.1
+    
+    --input steer
+    steer_angle=0
+    --input velocity
+    motor_velocity=dVel*10
+        --input brake
+    brake_force=0
+    time_init  = sim.getSimulationTime()
+    
+    theta = 3.142857/2
+    x = 0
+    y = 0
+
+    now = 0
+    vlas = 0
+    x_init = 0
+    v_init = 0
+    y_init = 0
+    theta_init = 3.142857/4
+    v = 0
+    linear_velocity = 0
+    sim.setJointTargetPosition(steer_handle, 0)
+    -- sim.setObjectFloatParameter(steer_handle, sim.jointfloatparam_maxaccel, 1000)
+end
+
+function sysCall_cleanup() 
+ 
+end 
+
+function sysCall_actuation() 
+    -- break_force = 0
+    t = sim.getSimulationTime()
+    delta_t = round(t - time_init)
+    -- if delta_t < 0.1 then 
+    --     goto continue   
+    -- end    
+    message = string.format("control%d", now)
+    now = now+1
+    print("[CNT]Trying to get controls for ", message)
+    message = sim.getStringSignal(message)
+    cont = split(message, ',')
+    print(type(cont))
+    a = cont[1]
+    -- print("velocity")
+    -- print(v)
+    delta = cont[2]
+    print("[CNF]Controls Confirmation , " ,   a ,   delta)
+    --current steer pos
+    steer_pos=sim.getJointPosition(steer_handle);
+    --current angular velocity of back left wheel
+    bl_wheel_velocity=sim.getObjectFloatParam(bl_brake_handle,sim.jointfloatparam_velocity)
+    --current angular velocity of back right wheel
+    br_wheel_velocity=sim.getObjectFloatParam(br_brake_handle,sim.jointfloatparam_velocity)
+    --average angular velocity of the back wheels
+    rear_wheel_velocity=(bl_wheel_velocity+br_wheel_velocity)/2
+    --linear velocity
+    linear_velocity=rear_wheel_velocity*0.09 
+    v = linear_velocity
+    print("[VHL] Current Linear Velocity", v)
+    print("[VHL] Current Steer Angle", steer_pos)
+
+    steer_angle = steer_pos + delta*0.01
+    motor_accelaration = a/0.09
+    
+    if (steer_angle> max_steer_angle) then
+    steer_angle = max_steer_angle
+    end
+
+    if (steer_angle< -max_steer_angle) then
+    steer_angle = -max_steer_angle
+    end
+
+    -- if delta > 0 then
+    -- sim.setObjectFloatParameter(steer_handle, sim.jointfloatparam_maxvel, delta)
+    sim.setJointTargetPosition(steer_handle, steer_angle)
+    -- sim.setJointTargetVelocity(steer_handle, delta)
+    -- end    
+    rear_wheel_velocity = rear_wheel_velocity + motor_accelaration
+
+    -- theta_init = theta
+    
+    -- if(v < 0.1*dVel) then
+    --     break_force = 100
+    -- end    
+
+    -- if a > 0 then 
+    --     motor_velocity = motor_velocity + dVel
+    -- else 
+    --     motor_velocity = motor_velocity - dVel
+    -- end 
+    
+    -- if math.abs(motor_velocity) <= 0.1*dVel then
+    --     break_force = 100
+    -- end 
+
+    if(brake_force>0) then
+    sim.setJointTargetForce(motor_handle, 0)
+    else
+    sim.setJointTargetForce(motor_handle, motor_torque)
+    sim.setObjectFloatParameter(motor_handle, sim.jointfloatparam_maxaccel, motor_accelaration)
+    sim.setJointTargetVelocity(motor_handle, rear_wheel_velocity)        
+    end
+    
+    sim.setJointTargetForce(fr_brake_handle, brake_force)
+    sim.setJointTargetForce(fl_brake_handle, brake_force)
+    sim.setJointTargetForce(bl_brake_handle, brake_force)
+    sim.setJointTargetForce(br_brake_handle, brake_force)
+
+    ::continue::
+end 

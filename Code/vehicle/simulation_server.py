@@ -89,7 +89,7 @@ class traj():
         else:
             theta = -pi
 
-        return [x, y, theta, self.vm, 0]
+        return [x, y, theta, self.vm]
 
 
 def main():
@@ -125,10 +125,10 @@ def main():
                 v_max = data["data"]["v_max"]
                 slver = mpc_solve(
                     data["data"]["x_init"],data["data"]["y_init"],\
-                                   data["data"]["theta_init"], data["data"]["v_init"], data["data"]["v_max"],\
+                                   data["data"]["theta_init"],  data["data"]["v_max"],\
                                       data["data"]["v_min"], data["data"]["delta_max"], \
                                         data["data"]["delta_min"], data["data"]["N"]\
-                                            , 0.005, data["data"]["L"], data["data"]["a_max"], data["data"]["a_min"])
+                                            , 0.1, data["data"]["L"], data["data"]["a_max"], data["data"]["a_min"])
                 arr = data["data"]["arr"]
                 v_max = data["data"]["v_max"]
                 v_min = data["data"]["v_min"]
