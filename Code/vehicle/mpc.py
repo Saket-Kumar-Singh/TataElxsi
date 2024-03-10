@@ -2,9 +2,10 @@
 from time import time, sleep
 import casadi as ca
 import numpy as np
-from casadi import sin, cos, pi, tan, atan
+from casadi import sin, cos, pi, tan, atan, sqrt
 import matplotlib.pyplot as plt
 from simulation_code import simulate
+from scipy.interpolate import interp1d
 
 
 def sign(n):
@@ -16,7 +17,7 @@ def sign(n):
 
 # Defi
 class mpc_solve():
-    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, dt = 0.1, L = 1):
+    def __init__(self, x_init = 0, y_init = 0, theta_init = 0, v_max = 5, v_min = -5, delta_max = pi/3, delta_min = -pi/3, N = 20, dt = 0.1, L = 1, a_min = -1, a_max = 1):
         self.L = L # Length of the vehicle (distance between front and rear wheels)
         v_max = v_max  # Maximum velocity
         v_min = v_min  # Minimum velocity
@@ -30,6 +31,7 @@ class mpc_solve():
         theta = ca.SX.sym('theta')  # orientation
         v = ca.SX.sym('v')  # velocity
         delta = ca.SX.sym('delta')  # steering angle
+        a = ca.SX.sym('a')
         # phi = ca.sx.sym('phi')
 
         # x_init = 0
@@ -42,14 +44,16 @@ class mpc_solve():
 
         Q_x = 10
         Q_y = 10
-        Q_theta = 10
-        R1 = 0.3
-        R2 = 0.3
+        Q_theta = 0.1
+        Q_v = 1
+
+        R1 = 2
+        R2 = 5
         # Define the state vector
-        self.states = ca.vertcat(x, y, theta)
+        self.states = ca.vertcat(x, y, theta, v)
 
         # Define the control vector
-        self.controls = ca.vertcat(v, delta)
+        self.controls = ca.vertcat(a, delta)
 
         self.n_states = self.states.numel()
         self.n_controls = self.controls.numel()
@@ -60,7 +64,7 @@ class mpc_solve():
         # P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + self.n_states)
         P = ca.SX.sym('P', self.n_states*(self.N+1) + self.n_controls + 8*3)
 
-        Q = ca.diagcat(Q_x, Q_y, Q_theta)
+        Q = ca.diagcat(Q_x, Q_y, Q_theta, Q_v)
         R = ca.diagcat(R1, R2)
         # D = ca.diagcat(dst1, dst2, dst3)
 
@@ -73,11 +77,13 @@ class mpc_solve():
         x_dot = v * cos(theta)
         y_dot =  v * sin(theta)
         theta_dot = v * sin(delta) / self.L
+        v_dot = a
 
         rhs = ca.vertcat(
             x_dot, 
             y_dot, 
             theta_dot,
+            v_dot
         )
 
         # Define the discrete-time dynamics using a forward Euler integration scheme
@@ -93,13 +99,16 @@ class mpc_solve():
         lbx[0:self.n_states*(self.N+1) : self.n_states] = -2000
         lbx[1:self.n_states*(self.N+1) : self.n_states] = -2000
         lbx[2:self.n_states*(self.N+1) : self.n_states] = -ca.inf
+        lbx[3:self.n_states*(self.N+1) : self.n_states] = v_min
+        # l
 
         ubx[0:self.n_states*(self.N+1) : self.n_states] = 2000
         ubx[1:self.n_states*(self.N+1) : self.n_states] = 2000
         ubx[2:self.n_states*(self.N+1) : self.n_states] = ca.inf
+        ubx[3:self.n_states*(self.N+1) : self.n_states] = v_max
 
-        lbx[self.n_states*(self.N+1) : :self.n_controls] = v_min
-        ubx[self.n_states*(self.N+1) : :self.n_controls] = v_max
+        lbx[self.n_states*(self.N+1) : :self.n_controls] = a_min
+        ubx[self.n_states*(self.N+1) : :self.n_controls] = a_max
 
         lbx[self.n_states*(self.N+1) +1 : : self.n_controls] = delta_min
         ubx[self.n_states*(self.N+1) + 1: : self.n_controls] = delta_max
@@ -114,6 +123,7 @@ class mpc_solve():
         d8 = P[(self.N+1)*self.n_states + self.n_controls + 21:(self.N+1)*self.n_states + self.n_controls + 24]
         # d1 = P[(self.N+1)*self.n_states + self.n_controls:(self.N+1)*self.n_states + self.n_controls]
         las_con = P[(self.N+1)*self.n_states:(self.N+1)*self.n_states + self.n_controls]
+
         for k in range(self.N):
             # print(las_con)
             st = X[:, k]
@@ -216,7 +226,7 @@ class mpc_solve():
 
     def shift_timestep(self, dt, t0, state_init, u, f):
         f = self.f
-        f_value = state_init + ca.repmat(self.dt, self.n_states, 1)*f(state_init, u[:, 0]) + ca.DM(0.01*np.random.randn(3, 1))
+        f_value = state_init + ca.repmat(self.dt, self.n_states, 1)*f(state_init, u[:, 0]) 
         next_state= ca.DM.full((f_value))
 
         t0 = t0 + self.dt
@@ -301,69 +311,58 @@ class mpc_solve():
 def tan_inv(st1, st2):
     if(st1[0] == st2[0]):
         if(st1[1] > st2[1]):
-            return pi/2
+            return -pi/2
         else:
             return pi/2
     else:
         return atan((st1[1] - st2[1])/(st1[0] - st2[0]))      
 
 
+class traj():
+    def __init__(self, arr, v_max):
+        print("[SVR]Making Trajectory")
+        self.arr = arr
+        self.vm = v_max/2
+        self.x = []
+        self.y = []
+        self.t = []
+        self.x.append(arr[0][0])
+        self.y.append(arr[0][1])
+        self.t.append(0)
+        t = 0
+        for i in range(len(arr) - 1):
+            t_now = t + sqrt((arr[i][0] - arr[i+1][0])**2 + (arr[i+1][1]- arr[i][1])**2)/self.vm
+            self.x.append( arr[i+1][0])
+            self.t.append(t_now)
+            self.y.append (arr[i+1][1])
+            t = t_now
+
+        self.x_inter = interp1d(self.t, self.x, kind = "linear")
+        self.y_inter = interp1d(self.t, self.y, kind = "linear")
+
+    def func(self, t):
+        try:
+            x = self.x_inter(t)
+            y = self.y_inter(t)
+            # dy_dx = 0
+            theta = 0
+            if (self.x_inter(t+0.001) - self.x_inter(t)):
+                dy_dx = (self.y_inter(t + 0.001) - self.y_inter(t))/(self.x_inter(t+0.001) - self.x_inter(t))
+                theta = atan(dy_dx)
+                if dy_dx < 0 and self.y_inter(t + 0.001) - self.y_inter(t) > 0:
+                    theta = pi + theta
+
+            elif(self.y_inter(t + 0.001) > self.y_inter(t)):
+                theta = pi
+            else:
+                theta = -pi
+
+            return [x, y, theta, self.vm]
+        except:
+            return [*arr[-1], tan_inv(arr[-2], arr[-1]), 0]
+
 if __name__ == '__main__':
     arr = [(0,0), (5, 5), (5, 10), (10, 10), (15, 15), (15, 10), (20, 10), (20, 5), (25,5), (25,10), (30, 15), (30, 20), (30, 30), (25, 25)]
-
-    # def func(t, v_max = 3, arr = arr, step_size = 7.0699):
-    #     __time = step_size/v_max
-    #     if(t/__time >= len(arr) - 1):
-    #         return [*arr[-1], tan_inv(arr[-1], arr[-2])]
-        
-    #     (x, y) = arr[int(t/__time)]
-    #     (x1, y1) = arr[int(t/__time) + 1]
-    #     p = int(t/__time)
-    #     theta = 0
-    #     if(x1 == x):
-    #         if(y1 > y):
-    #             theta = pi/2
-    #         else:    
-    #             theta = -pi/2
-    #     else:
-    #         theta = atan((y1 - y)/(x1 - x))
-    #     vx = 3*cos(theta)
-    #     vy = 3*sin(theta)
-    #     px = x + vx*(t - __time*p)
-    #     py = y + vy*(t - __time*p)
-    #     # To keep the value of p in bound
-    #     px = min(px, max(x,x1))
-    #     px = max(px, min(x, x1))
-    #     py = min(py, max(y,y1))
-    #     py = max(py, min(y,y1))
-    #     return [px, py, theta]
-    def func(t):
-        if(t/2.35 >= len(arr) - 1):
-            return [*arr[-1], 0]
-        
-        (x, y) = arr[int(t/2.35)]
-        (x1, y1) = arr[int(t/2.35) + 1]
-        p = int(t/2.35)
-        theta = 0
-        if(x1 == x):
-            if(y1 > y):
-                theta = pi/2
-            else:    
-                theta = -pi/2
-        else:
-            theta = atan((y1 - y)/(x1 - x))
-
-        vx = 3*cos(theta)
-        vy = 3*sin(theta)
-        px = x + vx*(t - 2.35*p)
-        py = y + vy* (t - 2.35*p)
-
-        # To keep the value of p in bound
-        px = min(px, max(x,x1))
-        px = max(px, min(x, x1))
-        py = min(py, max(y,y1))
-        py = max(py, min(y,y1))
-        return [px, py, theta]
 
     t0 = 0
     slver1 = mpc_solve()    
@@ -371,7 +370,7 @@ if __name__ == '__main__':
     las_con = ca.DM.zeros(slver1.n_controls, 1)
     sim_time = 50
     times = 0
-
+    pth = traj(arr,  5)
     xs = []
     ys = []
     desx = []
@@ -379,14 +378,17 @@ if __name__ == '__main__':
     x_init = 0
     y_init = 0
     theta_init = 0
+    v_init = 0
+
     mpc_iter = 0
-    state_init = ca.DM([x_init, y_init, theta_init])
+    state_init = ca.DM([x_init, y_init, theta_init, 0])
     # x_target = 25
     # y_target = 25
-    state_target = ca.DM([*arr[-1], pi/4])
+    state_target = ca.DM([*arr[-1], tan_inv(arr[-2], arr[-1]), 0])
     y_target = float(state_target[1][0])
     x_target = float(state_target[0][0])
     theta_target = float(state_target[2][0])
+
     # theta_target = -pi/4
     conts = []
     u0 = ca.DM.zeros((slver1.n_controls, slver1.N))
@@ -397,15 +399,15 @@ if __name__ == '__main__':
     cat_controls = slver1.DM2Arr(u0[:, 0])
     while (ca.norm_2(state_init - state_target) > 1e-5) and (mpc_iter * slver1.dt < sim_time):
         t1 = time()
-        desx.append(func(mpc_iter*slver1.dt)[0])
-        desy.append(func(mpc_iter*slver1.dt)[1])
+        desx.append(pth.func(mpc_iter*slver1.dt)[0])
+        desy.append(pth.func(mpc_iter*slver1.dt)[1])
         slver1.args['p'] = ca.vertcat(
             state_init,     # current state
         )
         for i in range(slver1.N):
             slver1.args['p'] = ca.vertcat(
             slver1.args['p'],
-            ca.DM(func((mpc_iter + i)*slver1.dt))
+            ca.DM(pth.func((mpc_iter + i)*slver1.dt))
         )
         slver1.args['p'] = ca.vertcat(
             slver1.args['p'],
@@ -471,7 +473,7 @@ if __name__ == '__main__':
             t2-t1
         ))        
         mpc_iter = mpc_iter + 1
-        state_target = ca.DM(func(mpc_iter*slver1.dt))
+        state_target = ca.DM(pth.func(mpc_iter*slver1.dt))
 
     main_loop_time = time()
     ss_error = ca.norm_2(state_init - state_target)
@@ -504,8 +506,8 @@ if __name__ == '__main__':
     fin_pos_x = []
     fin_pos_y = []
     for tm in t:
-        fin_pos_x.append((func(tm))[0])
-        fin_pos_y.append((func(tm))[1])
+        fin_pos_x.append((pth.func(tm))[0])
+        fin_pos_y.append((pth.func(tm))[1])
     # print(conts[0][0,0])    
     plt.plot(xs, ys)
     plt.scatter(fin_pos_x, fin_pos_y, s = 10)

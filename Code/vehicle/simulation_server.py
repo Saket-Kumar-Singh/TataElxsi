@@ -5,45 +5,94 @@ from mpc import mpc_solve, tan_inv
 from math import cos, sin, atan, pi
 import casadi as ca
 from time import sleep
+import math
+from scipy.interpolate import interp1d
 
 def return_message(client_socket, data):
     data = data.encode("utf-8")
     client_socket.sendall(data)
 
-global v_max 
-global v_min 
-global arr
+v_max = 0 
+v_min = 0 
+arr = []
 
-def func(t,  step_size = 5):
-    global v_max
-    v_m = v_max/2
-    __time = 1*step_size/v_m
-    if(t/__time >= len(arr) - 1):
-        return [*arr[-1], tan_inv(arr[-1], arr[-2])]
+# def func(t,  step_size = 5):
+#     global v_max
+#     global arr
+#     # print("Path to be followed", arr)
+#     # print("I will not go faster than", v_max)
+#     v_m = v_max/2
+#     __time = 1*step_size/v_m
+#     print(t/__time)
+#     if(t/__time >= len(arr) - 1):
+#         return [*arr[-1], tan_inv(arr[-1], arr[-2])]
     
-    (x, y) = arr[int(t/__time)]
-    (x1, y1) = arr[int(t/__time) + 1]
-    p = int(t/__time)
-    theta = 0
-    if(x1 == x):
-        if(y1 > y):
-            theta = -pi/2
-        else:    
-            theta = pi/2
-    else:
-        theta = atan((y1 - y)/(x1 - x))
-    vx = v_m*cos(theta)
-    vy = v_m*sin(theta)
-    px = x + vx*(t - __time*p)
-    py = y + vy* (t - __time*p)
-    # To keep the value of p in bound
-    px = min(px, max(x,x1))
-    px = max(px, min(x, x1))
-    py = min(py, max(y,y1))
-    py = max(py, min(y,y1))
-    return [px, py, theta]
+#     (x, y) = arr[int(t/__time)]
+#     (x1, y1) = arr[int(t/__time) + 1]
+#     p = int(t/__time)
+#     # print(x, y)
+#     # print(x1, y1)
+#     theta = 0
+#     if(x1 == x):
+#         if(y1 > y):
+#             theta = -pi/2
+#         else:    
+#             theta = pi/2
+#     else:
+#         theta = atan((y1 - y)/(x1 - x))
+#     vx = v_m*cos(theta)
+#     vy = v_m*sin(theta)
+#     px = x + vx*(t - __time*p)
+#     py = y + vy* (t - __time*p)
+#     # To keep the value of p in bound
+#     px = min(px, max(x,x1))
+#     px = max(px, min(x, x1))
+#     py = min(py, max(y,y1))
+#     py = max(py, min(y,y1))
+#     return [px, py, theta]
 
-if __name__ == "__main__":
+class traj():
+    def __init__(self, arr, v_max):
+        print("[SVR]Making Trajectory")
+        self.arr = arr
+        self.vm = v_max/1.5
+        self.x = []
+        self.y = []
+        self.t = []
+        self.x.append(arr[0][0])
+        self.y.append(arr[0][1])
+        self.t.append(0)
+        t = 0
+        for i in range(len(arr) - 1):
+            t_now = t + math.sqrt((arr[i][0] - arr[i+1][0])**2 + (arr[i+1][1]- arr[i][1])**2)/self.vm
+            self.x.append( arr[i+1][0])
+            self.t.append(t_now)
+            self.y.append (arr[i+1][1])
+            t = t_now
+
+        self.x_inter = interp1d(self.t, self.x, kind = "linear")
+        self.y_inter = interp1d(self.t, self.y, kind = "linear")
+
+    def func(self, t):
+        x = self.x_inter(t)
+        y = self.y_inter(t)
+        # dy_dx = 0
+        theta = 0
+        if (self.x_inter(t+0.001) - self.x_inter(t)):
+            dy_dx = (self.y_inter(t + 0.001) - self.y_inter(t))/(self.x_inter(t+0.001) - self.x_inter(t))
+            theta = atan(dy_dx)
+            if dy_dx < 0 and self.y_inter(t + 0.001) - self.y_inter(t) > 0:
+                theta = pi + theta
+
+        elif(self.y_inter(t + 0.001) > self.y_inter(t) ):
+            theta = pi
+        else:
+            theta = -pi
+
+        return [x, y, theta, self.vm, 0]
+
+
+def main():
     # Create a socket server
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('127.0.0.1', 8800))
@@ -57,7 +106,7 @@ if __name__ == "__main__":
     print(f"Connected to {addr}")
     slver = ""
     while True:
-        data = client_socket.recv(4096)
+        data = client_socket.recv(8000)
         ack = "ACK"
         client_socket.sendall(ack.encode("utf-8"))
         # print("recievedSomething")
@@ -70,28 +119,26 @@ if __name__ == "__main__":
             if(data["id"] == "makeSolver"):
                 print("Making Solver")
                 # try:
-                global vmax
+                global v_max
+                global arr
+                global v_min
                 v_max = data["data"]["v_max"]
                 slver = mpc_solve(
                     data["data"]["x_init"],data["data"]["y_init"],\
-                                   data["data"]["theta_init"], data["data"]["v_max"],\
+                                   data["data"]["theta_init"], data["data"]["v_init"], data["data"]["v_max"],\
                                       data["data"]["v_min"], data["data"]["delta_max"], \
                                         data["data"]["delta_min"], data["data"]["N"]\
-                                            , 0.005, data["data"]["L"])
+                                            , 0.005, data["data"]["L"], data["data"]["a_max"], data["data"]["a_min"])
                 arr = data["data"]["arr"]
+                v_max = data["data"]["v_max"]
+                v_min = data["data"]["v_min"]
                 data = {
                     "id" : "mpcMakingResult",
                     "data" : True
                 }
                 data = json.dumps(data)
+                inter = traj(arr, v_max)
                 return_message(client_socket, data)
-                # except:
-                #     data = {
-                #         "id" : "mpcMakingResult",
-                #         "data" : False
-                #     }     
-                #     data = json.dumps(data)           
-                #     return_message(client_socket, data)
 
             else:
                 # print("No Shit")
@@ -110,7 +157,7 @@ if __name__ == "__main__":
                 # print(np.array(x0).shape)
                 x0 = ca.DM(x0)
                 u = np.array(u)
-                x0, u = slver.mpc_control(x0, u, t_now, func, las_con,x0, x1, x2, x3, x4, x5, x6, x7, x8)
+                x0, u = slver.mpc_control(x0, u, t_now, inter.func, las_con,x0, x1, x2, x3, x4, x5, x6, x7, x8)
                 # print(u[:, 0])
                 x0 = x0.full()
                 x0 = x0.tolist()
@@ -130,3 +177,6 @@ if __name__ == "__main__":
     # Close sockets
     client_socket.close()
     server_socket.close()
+
+if __name__ == "__main__":
+    main()
