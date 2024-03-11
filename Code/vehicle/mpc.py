@@ -172,14 +172,14 @@ class mpc_solve():
         # obsy9 = d9[1]
         rad = 1
         for k in range(self.N):
-            g = ca.vertcat(g, -((X[0, k] - obsx1)**2 + (X[1, k] - obsy1)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx2)**2 + (X[1, k] - obsy2)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx3)**2 + (X[1, k] - obsy3)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx4)**2 + (X[1, k] - obsy4)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx5)**2 + (X[1, k] - obsy5)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx6)**2 + (X[1, k] - obsy6)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx7)**2 + (X[1, k] - obsy7)**2) + (1.5*self.L + 1))
-            g = ca.vertcat(g, -((X[0, k] - obsx8)**2 + (X[1, k] - obsy8)**2) + (1.5*self.L + 1))
+            g = ca.vertcat(g, -((X[0, k] - obsx1)**2 + (X[1, k] - obsy1)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx2)**2 + (X[1, k] - obsy2)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx3)**2 + (X[1, k] - obsy3)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx4)**2 + (X[1, k] - obsy4)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx5)**2 + (X[1, k] - obsy5)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx6)**2 + (X[1, k] - obsy6)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx7)**2 + (X[1, k] - obsy7)**2) + (0.5*self.L))
+            g = ca.vertcat(g, -((X[0, k] - obsx8)**2 + (X[1, k] - obsy8)**2) + (0.5*self.L))
 
         self.OPT_variable = ca.vertcat(
             X.reshape((-1, 1)), 
