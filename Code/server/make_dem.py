@@ -42,28 +42,29 @@ def generate_smooth_dem(rows, cols, scale=100.0, octaves=0.3, persistence=0.5, l
     return world_smooth_scaled
     # return world_smooth_scaled
 
-
+# for i in range(len(dem)):
+#     dem[i] = dem[i]/2
 
 if __name__ == "__main__":
     # Example usage
-    rows = 150
-    cols = 150
+    rows = 50
+    cols = 50
     scale = 30
     # octaves = 2
     # persistence = 0.5
     # lacunarity = 0
     # seed = 6
     octaves = 2
-    persistence = 1
+    persistence = 2
     lacunarity = 2.0
     seed = 4
-    smoothness = 2
-    new_min = -5
-    new_max = 4 # Adjust the new maximum height
+    smoothness = 3
+    new_min = -2
+    new_max = 2 # Adjust the new maximum height
 
     smooth_dem = generate_smooth_dem(rows, cols, scale, octaves, persistence, lacunarity, seed, smoothness, new_min, new_max)
     plot_dem(smooth_dem)
-    file = open("DEM.txt", 'a')
+    file = open("DEM_small.txt", 'w')
     for i in range(len(smooth_dem)):
       for j in range(len(smooth_dem[0])):
         file.write(str(smooth_dem[i][j]))
